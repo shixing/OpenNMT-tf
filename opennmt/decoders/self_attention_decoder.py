@@ -101,6 +101,9 @@ class SelfAttentionDecoder(decoder.Decoder):
       inputs = self.position_encoder(inputs, position=step + 1 if step is not None else None)
     inputs = common.dropout(inputs, self.dropout, training=training)
 
+    #tf.print('inputs:', inputs)
+    #tf.print('step:', step, "input shape:", tf.shape(inputs))
+
     # Prepare query mask.
     mask = None
     if step is None:
@@ -188,5 +191,18 @@ class SelfAttentionDecoder(decoder.Decoder):
       memory_kv = [
           (tf.zeros(shape, dtype=dtype), tf.zeros(shape, dtype=dtype))
           for _ in range(self.num_sources)]
+      #step = tf.zeros(batch_size, 1)
       cache.append(dict(self_kv=self_kv, memory_kv=memory_kv))
+
     return cache
+
+  def init_prefix_state(self, emission_matrix, transition_matrix, length_matrix, batch_size, cache):
+    self.emission_matrix = emission_matrix
+    self.transition_matrix = transition_matrix
+    self.length_matrix = length_matrix
+    shape = [batch_size, 1, 1]
+    current_state = tf.zeros(shape, dtype = tf.int32)
+    cache.append(current_state)
+    return cache
+
+

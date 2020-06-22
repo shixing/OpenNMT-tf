@@ -142,6 +142,32 @@ class SequenceToSequence(model.SequenceGenerator):
     if EmbeddingsSharingLevel.share_target_embeddings(self.share_embeddings):
       self.decoder.reuse_embeddings(self.labels_inputter.embedding)
 
+  def infer_with_prefix(self, features):
+    _, predictions = self.call_with_prefix(features)
+    if "index" in features:
+      predictions["index"] = features["index"]
+    return predictions
+
+  def call_with_prefix(self, features, labels=None, training=None, step=None):
+    # Encode the source.
+    source_length = self.features_inputter.get_length(features)
+    source_inputs = self.features_inputter(features, training=training)
+    encoder_outputs, encoder_state, encoder_sequence_length = self.encoder(
+        source_inputs, sequence_length=source_length, training=training)
+
+    outputs = None
+    predictions = None
+
+    predictions = self._dynamic_decode_with_prefix(
+        features,
+        encoder_outputs,
+        encoder_state,
+        encoder_sequence_length
+    )
+
+    return outputs, predictions
+
+
   def call(self, features, labels=None, training=None, step=None):
     # Encode the source.
     source_length = self.features_inputter.get_length(features)
@@ -168,7 +194,8 @@ class SequenceToSequence(model.SequenceGenerator):
           features,
           encoder_outputs,
           encoder_state,
-          encoder_sequence_length)
+          encoder_sequence_length
+      )
 
     return outputs, predictions
 
@@ -301,6 +328,88 @@ class SequenceToSequence(model.SequenceGenerator):
       for key, value in six.iteritems(predictions):
         predictions[key] = value[:, :num_hypotheses]
     return predictions
+
+  def _dynamic_decode_with_prefix(self, features, encoder_outputs, encoder_state, encoder_sequence_length):
+    params = self.params
+    batch_size = tf.shape(tf.nest.flatten(encoder_outputs)[0])[0]
+    start_ids = tf.fill([batch_size], constants.START_OF_SENTENCE_ID)
+    beam_size = params.get("beam_width", 1)
+
+    # Dynamically decodes from the encoder outputs.
+    initial_state = self.decoder.initial_state(
+        memory=encoder_outputs,
+        memory_sequence_length=encoder_sequence_length,
+        initial_state=encoder_state)
+    initial_state = self.decoder.init_prefix_state(features['emission_matrix'], features['transition_matrix'],
+                                                   features['length_matrix'],
+                                                   batch_size, initial_state)
+
+    sampled_ids, sampled_length, log_probs, alignment, _ = self.decoder.dynamic_decode_with_prefix(
+        self.labels_inputter,
+        start_ids,
+        initial_state=initial_state,
+        decoding_strategy=decoding.DecodingStrategy.from_params(params),
+        sampler=decoding.Sampler.from_params(params),
+        maximum_iterations=params.get("maximum_decoding_length", 250),
+        minimum_iterations=params.get("minimum_decoding_length", 0))
+    target_tokens = self.labels_inputter.ids_to_tokens.lookup(tf.cast(sampled_ids, tf.int64))
+
+    # Maybe replace unknown targets by the source tokens with the highest attention weight.
+    if params.get("replace_unknown_target", False):
+      if alignment is None:
+        raise TypeError("replace_unknown_target is not compatible with decoders "
+                        "that don't return alignment history")
+      if not isinstance(self.features_inputter, inputters.WordEmbedder):
+        raise TypeError("replace_unknown_target is only defined when the source "
+                        "inputter is a WordEmbedder")
+      source_tokens = features["tokens"]
+      if beam_size > 1:
+        source_tokens = tfa.seq2seq.tile_batch(source_tokens, beam_size)
+      # Merge batch and beam dimensions.
+      original_shape = tf.shape(target_tokens)
+      target_tokens = tf.reshape(target_tokens, [-1, original_shape[-1]])
+      align_shape = shape_list(alignment)
+      attention = tf.reshape(
+          alignment, [align_shape[0] * align_shape[1], align_shape[2], align_shape[3]])
+      # We don't have attention for </s> but ensure that the attention time dimension matches
+      # the tokens time dimension.
+      attention = reducer.align_in_time(attention, tf.shape(target_tokens)[1])
+      replaced_target_tokens = replace_unknown_target(target_tokens, source_tokens, attention)
+      target_tokens = tf.reshape(replaced_target_tokens, original_shape)
+
+    # Maybe add noise to the predictions.
+    decoding_noise = params.get("decoding_noise")
+    if decoding_noise:
+      target_tokens, sampled_length = _add_noise(
+          target_tokens,
+          sampled_length,
+          decoding_noise,
+          params.get("decoding_subword_token", "￭"),
+          params.get("decoding_subword_token_is_spacer"))
+      alignment = None  # Invalidate alignments.
+
+    predictions = {"log_probs": log_probs}
+    if self.labels_inputter.tokenizer.in_graph:
+      detokenized_text = self.labels_inputter.tokenizer.detokenize(
+          tf.reshape(target_tokens, [batch_size * beam_size, -1]),
+          sequence_length=tf.reshape(sampled_length, [batch_size * beam_size]))
+      predictions["text"] = tf.reshape(detokenized_text, [batch_size, beam_size])
+    else:
+      predictions["tokens"] = target_tokens
+      predictions["length"] = sampled_length
+      if alignment is not None:
+        predictions["alignment"] = alignment
+
+    # Maybe restrict the number of returned hypotheses based on the user parameter.
+    num_hypotheses = params.get("num_hypotheses", 1)
+    if num_hypotheses > 0:
+      if num_hypotheses > beam_size:
+        raise ValueError("n_best cannot be greater than beam_width")
+      for key, value in six.iteritems(predictions):
+        predictions[key] = value[:, :num_hypotheses]
+    return predictions
+
+
 
   def compute_loss(self, outputs, labels, training=True):
     params = self.params

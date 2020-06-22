@@ -555,3 +555,4 @@ class ExampleInputter(ParallelInputter):
         shuffle_buffer_size=shuffle_buffer_size,
         prefetch_buffer_size=prefetch_buffer_size))
     return dataset
+

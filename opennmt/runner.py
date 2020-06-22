@@ -20,6 +20,7 @@ from opennmt import models
 from opennmt import training as training_util
 from opennmt.utils import checkpoint as checkpoint_util
 from opennmt.utils import misc
+from opennmt.inputters.prefix_inputter import PrefixInputter
 
 
 # These options require a value but we can fallback to a default one.
@@ -134,6 +135,10 @@ class Runner(object):
   def _init_run(self, training=False, num_devices=1):
     config = self._finalize_config(training=training, num_devices=num_devices)
     return self._init_model(config), config
+
+  def init_prefix_inputter(self, fn_vocab):
+    self.fn_vocab = fn_vocab
+    self.prefix_inputter = PrefixInputter(fn_vocab)
 
   def train(self, num_devices=1, with_eval=False, checkpoint_path=None):
     """Runs the training loop.
@@ -326,6 +331,8 @@ class Runner(object):
     else:
       stream = sys.stdout
 
+
+
     ordered_writer = None
     infer_fn = tf.function(model.infer, input_signature=(dataset.element_spec,))
     write_fn = lambda prediction: (
@@ -337,6 +344,7 @@ class Runner(object):
     start_time = time.time()
 
     for source in dataset:
+      tf.print("Source:", source)
       predictions = infer_fn(source)
       predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
       end_time = time.time()
@@ -367,6 +375,87 @@ class Runner(object):
         tf.get_logger().info("Tokens per second: %f", total_tokens / total_time)
     if predictions_file:
       stream.close()
+
+  def infer_with_prefix(self,
+            features_file,
+            prefix_file,
+            predictions_file=None,
+            checkpoint_path=None,
+            log_time=False):
+    """Runs inference.
+
+    Args:
+      features_file: The file(s) to infer from.
+      predictions_file: If set, predictions are saved in this file.
+      checkpoint_path: Path of a specific checkpoint to predict. If ``None``,
+        the latest is used.
+      log_time: If ``True``, several time metrics will be printed in the logs at
+        the end of the inference loop.
+    """
+    checkpoint, config = self._init_run()
+    checkpoint.restore(checkpoint_path=checkpoint_path, weights_only=True)
+    model = checkpoint.model
+    infer_config = config["infer"]
+    prefix_inputter = self.prefix_inputter
+
+    dataset = prefix_inputter.make_inference_dataset(
+        features_file,
+        model.examples_inputter.features_inputter,
+        prefix_file,
+        infer_config["batch_size"],
+        length_bucket_width=infer_config["length_bucket_width"],
+        prefetch_buffer_size=infer_config.get("prefetch_buffer_size"))
+
+    if predictions_file:
+      stream = io.open(predictions_file, encoding="utf-8", mode="w")
+    else:
+      stream = sys.stdout
+
+
+
+    ordered_writer = None
+    infer_fn = tf.function(model.infer_with_prefix, input_signature=(dataset.element_spec,))
+    write_fn = lambda prediction: (
+        model.print_prediction(prediction, params=infer_config, stream=stream))
+
+    total_time = 0
+    total_tokens = 0
+    total_examples = 0
+    start_time = time.time()
+
+    for source in dataset:
+      tf.print("Source:", source)
+      predictions = infer_fn(source)
+      predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
+      end_time = time.time()
+      if log_time:
+        total_time += end_time - start_time
+        batch_size = next(six.itervalues(predictions)).shape[0]
+        total_examples += batch_size
+        length = predictions.get("length")
+        if length is not None:
+          if len(length.shape) == 2:
+            length = length[:, 0]
+          total_tokens += sum(length)
+      for prediction in misc.extract_batches(predictions):
+        if "index" in prediction:
+          if ordered_writer is None:
+            ordered_writer = misc.OrderRestorer(
+                index_fn=lambda prediction: prediction["index"], callback_fn=write_fn)
+          ordered_writer.push(prediction)
+        else:
+          write_fn(prediction)
+      start_time = time.time()
+
+    if log_time:
+      tf.get_logger().info("Total prediction time (s): %f", total_time)
+      tf.get_logger().info(
+          "Average prediction time (s): %f", total_time / total_examples)
+      if total_tokens > 0:
+        tf.get_logger().info("Tokens per second: %f", total_tokens / total_time)
+    if predictions_file:
+      stream.close()
+
 
   def export(self, export_dir, checkpoint_path=None):
     """Exports a model.

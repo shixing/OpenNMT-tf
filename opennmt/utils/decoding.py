@@ -407,6 +407,7 @@ def dynamic_decode(symbols_to_logits_fn,
   def _body(step, finished, state, inputs, outputs, attention, cum_log_probs, extra_vars):
     # Get log probs from the model.
     result = symbols_to_logits_fn(inputs, step, state)
+
     logits, state = result[0], result[1]
     attn = result[2] if len(result) > 2 else None
     logits = tf.cast(logits, tf.float32)

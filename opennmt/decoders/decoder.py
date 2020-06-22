@@ -180,6 +180,7 @@ class Decoder(tf.keras.layers.Layer):
         dtype = sentinel.dtype
     return self._get_initial_state(batch_size, dtype, initial_state=initial_state)
 
+
   # pylint: disable=arguments-differ
   def call(self,
            inputs,
@@ -402,6 +403,99 @@ class Decoder(tf.keras.layers.Layer):
         minimum_iterations=minimum_iterations,
         attention_history=self.support_alignment_history,
         attention_size=tf.shape(self.memory)[1] if self.support_alignment_history else None)
+
+  def dynamic_decode_with_prefix(self,
+                     embeddings,
+                     start_ids,
+                     end_id=constants.END_OF_SENTENCE_ID,
+                     initial_state=None,
+                     decoding_strategy=None,
+                     sampler=None,
+                     maximum_iterations=None,
+                     minimum_iterations=0):
+    """Decodes dynamically from :obj:`start_ids`.
+
+    Args:
+      embeddings: Target embeddings or :class:`opennmt.inputters.WordEmbedder`
+        to apply on decoded ids.
+      start_ids: Initial input IDs of shape :math:`[B]`.
+      end_id: ID of the end of sequence token.
+      initial_state: Initial decoder state.
+      decoding_strategy: A :class:`opennmt.utils.DecodingStrategy`
+        instance that define the decoding logic. Defaults to a greedy search.
+      sampler: A :class:`opennmt.utils.Sampler` instance that samples
+        predictions from the model output. Defaults to an argmax sampling.
+      maximum_iterations: The maximum number of iterations to decode for.
+      minimum_iterations: The minimum number of iterations to decode for.
+
+    Returns:
+      A :class:`opennmt.utils.DecodingResult` instance.
+
+    See Also:
+      :func:`opennmt.utils.dynamic_decode`
+    """
+    if isinstance(embeddings, text_inputter.WordEmbedder):
+      input_fn = lambda ids: embeddings({"ids": ids})
+    else:
+      input_fn = lambda ids: tf.nn.embedding_lookup(embeddings, ids)
+
+    def symbols_to_logits_fn(ids, step, state):
+
+
+      tf.print("step",step)
+
+
+      # shape: batch_size, 1, 1
+      current_state = state[-1]
+      tf.print("current_state", current_state)
+
+      logits, new_state, attention = self(input_fn(ids), step, state)
+
+      vocab_size = tf.shape(logits[0])[0]
+      state_idx = current_state[0][0][0]
+
+      new_logits = logits
+      next_state = current_state
+
+      if state_idx >= 0:
+        lm = self.length_matrix
+        em = self.emission_matrix
+        tm = self.transition_matrix
+        tf.print("length_matrix", lm)
+        tf.print("emission_matrix", em)
+        tf.print("tranistion_matrix", tm)
+
+        length = lm[0][state_idx]
+        indexes = em[0][state_idx][:length]
+        next_states = tm[0][state_idx][:length]
+        tf.print(indexes)
+        selected_logits = tf.nn.embedding_lookup(logits[0], indexes)
+        top1_index = tf.math.argmax(selected_logits)
+        top1_vocab_idx = indexes[top1_index]
+        top1_next_state = next_states[top1_index]
+        mask = tf.one_hot(top1_vocab_idx, vocab_size, on_value=0.0, off_value=-100000.0)
+        new_logits = logits + mask
+        next_state = tf.ones_like(current_state) * top1_next_state
+
+      new_state.append(next_state)
+      tf.print("new_logits", new_logits, summarize = -1)
+      tf.print("next_state", next_state)
+
+
+      return new_logits, new_state, attention
+
+    return decoding.dynamic_decode(
+        symbols_to_logits_fn,
+        start_ids,
+        end_id=end_id,
+        initial_state=initial_state,
+        decoding_strategy=decoding_strategy,
+        sampler=sampler,
+        maximum_iterations=maximum_iterations,
+        minimum_iterations=minimum_iterations,
+        attention_history=self.support_alignment_history,
+        attention_size=tf.shape(self.memory)[1] if self.support_alignment_history else None)
+
 
   def map_v1_weights(self, weights):
     return self.output_layer.map_v1_weights(weights["dense"])
