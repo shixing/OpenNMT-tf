@@ -442,12 +442,12 @@ class Decoder(tf.keras.layers.Layer):
     def symbols_to_logits_fn(ids, step, state):
 
 
-      tf.print("step",step)
+      #tf.print("step",step)
 
 
       # shape: batch_size, 1, 1
       current_state = state[-1]
-      tf.print("current_state", current_state)
+      #tf.print("current_state", current_state)
 
       logits, new_state, attention = self(input_fn(ids), step, state)
 
@@ -456,19 +456,22 @@ class Decoder(tf.keras.layers.Layer):
 
       new_logits = logits
       next_state = current_state
-
-      if state_idx >= 0:
+      if state_idx == -2:
+        # stop decoding, generate eos
+        mask = tf.one_hot(2, vocab_size, on_value=0.0, off_value=-100000.0)
+        new_logits = logits + mask
+      elif state_idx >= 0:
         lm = self.length_matrix
         em = self.emission_matrix
         tm = self.transition_matrix
-        tf.print("length_matrix", lm)
-        tf.print("emission_matrix", em)
-        tf.print("tranistion_matrix", tm)
+        #tf.print("length_matrix", lm)
+        #tf.print("emission_matrix", em)
+        #tf.print("tranistion_matrix", tm)
 
         length = lm[0][state_idx]
         indexes = em[0][state_idx][:length]
         next_states = tm[0][state_idx][:length]
-        tf.print(indexes)
+        #tf.print(indexes)
         selected_logits = tf.nn.embedding_lookup(logits[0], indexes)
         top1_index = tf.math.argmax(selected_logits)
         top1_vocab_idx = indexes[top1_index]
@@ -478,8 +481,8 @@ class Decoder(tf.keras.layers.Layer):
         next_state = tf.ones_like(current_state) * top1_next_state
 
       new_state.append(next_state)
-      tf.print("new_logits", new_logits, summarize = -1)
-      tf.print("next_state", next_state)
+      #tf.print("new_logits", new_logits, summarize = -1)
+      #tf.print("next_state", next_state)
 
 
       return new_logits, new_state, attention

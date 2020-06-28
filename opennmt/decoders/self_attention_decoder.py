@@ -196,12 +196,12 @@ class SelfAttentionDecoder(decoder.Decoder):
 
     return cache
 
-  def init_prefix_state(self, emission_matrix, transition_matrix, length_matrix, batch_size, cache):
+  def init_prefix_state(self, emission_matrix, transition_matrix, length_matrix, init_state, batch_size, cache):
     self.emission_matrix = emission_matrix
     self.transition_matrix = transition_matrix
     self.length_matrix = length_matrix
     shape = [batch_size, 1, 1]
-    current_state = tf.zeros(shape, dtype = tf.int32)
+    current_state = tf.fill(shape, init_state)
     cache.append(current_state)
     return cache
 

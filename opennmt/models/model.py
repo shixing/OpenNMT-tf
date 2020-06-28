@@ -124,6 +124,7 @@ class Model(tf.keras.layers.Layer):
     Returns:
       The model predictions.
     """
+    print('!!!!!!Trace!!!!', features)
     _, predictions = self(features)
     if "index" in features:
       predictions["index"] = features["index"]

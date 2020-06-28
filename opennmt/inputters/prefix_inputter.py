@@ -105,6 +105,8 @@ def build_allowed_ids(orig_prefix, trie, vocab_to_id, allowed_ids_dict, overwrit
       allowed_ids_dict[orig_prefix] = allowed_ids
 
 def allowed_ids_dict_to_matrix(allowed_id_dict):
+
+
   _emission_matrix = []
   _transition_matrix = []
   length_matrix = []
@@ -116,7 +118,8 @@ def allowed_ids_dict_to_matrix(allowed_id_dict):
   # breath-first search
 
   q = deque()
-  q.append((start_key, 0))
+  if start_key in allowed_id_dict:
+    q.append((start_key, 0))
   max_length = 0
 
   while len(q) > 0:
@@ -148,8 +151,13 @@ def allowed_ids_dict_to_matrix(allowed_id_dict):
       emission_matrix[row][col] = _emission_matrix[row][col]
       transition_matrix[row][col] = _transition_matrix[row][col]
 
+  init_state = 0
+  if len(length_matrix) == 0:
+    init_state = -2
+
   length_matrix = np.array(length_matrix)
-  return emission_matrix, transition_matrix, length_matrix
+
+  return emission_matrix, transition_matrix, length_matrix, init_state
 
 def print_allowed_ids_dict(allowed_ids_dict, id_to_vocab):
   for prefix in allowed_ids_dict:
@@ -164,8 +172,8 @@ def get_emission_transition_matrix(prefix, trie, vocab_to_id, id_to_vocab):
   allowed_ids_dict = {}
   build_allowed_ids(prefix, trie, vocab_to_id, allowed_ids_dict, overwrite_key="[BOS]")
   #print_allowed_ids_dict(allowed_ids_dict, id_to_vocab)
-  emission_matrix, transition_matrix, length_matrix = allowed_ids_dict_to_matrix(allowed_ids_dict)
-  return emission_matrix, transition_matrix, length_matrix
+  emission_matrix, transition_matrix, length_matrix, init_state = allowed_ids_dict_to_matrix(allowed_ids_dict)
+  return emission_matrix, transition_matrix, length_matrix, init_state
 
 @six.add_metaclass(abc.ABCMeta)
 class PrefixInputter(Inputter):
@@ -193,19 +201,24 @@ class PrefixInputter(Inputter):
     ems = []
     tms = []
     lms = []
+    iss = []
     with open(data_file) as f:
       for line in f:
         prefix = line.strip()
-        emission_matrix, transition_matrix, length_matrix = get_emission_transition_matrix(prefix, self.trie, self.vocab_to_id, self.id_to_vocab)
+        emission_matrix, transition_matrix, length_matrix, init_state = get_emission_transition_matrix(prefix, self.trie, self.vocab_to_id, self.id_to_vocab)
+        if len(length_matrix) == 0:
+          print(prefix)
         ems.append(emission_matrix)
         tms.append(transition_matrix)
         lms.append(length_matrix)
+        iss.append(init_state)
 
-    d1 = tf.data.Dataset.from_tensor_slices(ems)
-    d2 = tf.data.Dataset.from_tensor_slices(tms)
-    d3 = tf.data.Dataset.from_tensor_slices(lms)
+    d1 = tf.data.Dataset.from_generator(ems.__iter__, tf.int32, tf.TensorShape([None, None]))
+    d2 = tf.data.Dataset.from_generator(tms.__iter__, tf.int32, tf.TensorShape([None, None]))
+    d3 = tf.data.Dataset.from_generator(lms.__iter__, tf.int32, tf.TensorShape([None]))
+    d4 = tf.data.Dataset.from_generator(iss.__iter__, tf.int32, tf.TensorShape([]))
 
-    return tf.data.Dataset.zip((d1,d2,d3))
+    return tf.data.Dataset.zip((d1,d2,d3, d4))
 
   def make_inference_dataset(self,
                              features_file,
@@ -247,16 +260,10 @@ class PrefixInputter(Inputter):
       feature.update(prefix_feature)
       return feature
 
-    def get_length(features):
-      return features['length']
+    dataset = dataset.map(map_func, num_parallel_calls=num_threads)
+    dataset = dataset.batch(1)
+    dataset = dataset.prefetch(prefetch_buffer_size)
 
-    dataset = dataset.apply(dataset_util.inference_pipeline(
-        batch_size,
-        process_fn=map_func,
-        length_bucket_width=length_bucket_width,
-        length_fn=get_length,
-        num_threads=num_threads,
-        prefetch_buffer_size=prefetch_buffer_size))
     return dataset
 
   def input_signature(self):
@@ -293,7 +300,7 @@ class PrefixInputter(Inputter):
     features['emission_matrix'] = element[0]
     features['transition_matrix'] = element[1]
     features['length_matrix'] = element[2]
-
+    features['init_state'] = element[3]
     return features
 
 

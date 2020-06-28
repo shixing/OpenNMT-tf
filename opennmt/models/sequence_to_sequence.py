@@ -143,6 +143,7 @@ class SequenceToSequence(model.SequenceGenerator):
       self.decoder.reuse_embeddings(self.labels_inputter.embedding)
 
   def infer_with_prefix(self, features):
+    print("!!!!!! Trace !!!!!!", features)
     _, predictions = self.call_with_prefix(features)
     if "index" in features:
       predictions["index"] = features["index"]
@@ -341,7 +342,7 @@ class SequenceToSequence(model.SequenceGenerator):
         memory_sequence_length=encoder_sequence_length,
         initial_state=encoder_state)
     initial_state = self.decoder.init_prefix_state(features['emission_matrix'], features['transition_matrix'],
-                                                   features['length_matrix'],
+                                                   features['length_matrix'], features['init_state'][0],
                                                    batch_size, initial_state)
 
     sampled_ids, sampled_length, log_probs, alignment, _ = self.decoder.dynamic_decode_with_prefix(

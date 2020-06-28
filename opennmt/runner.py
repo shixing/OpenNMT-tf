@@ -335,12 +335,15 @@ class Runner(object):
 
     ordered_writer = None
     infer_fn = tf.function(model.infer, input_signature=(dataset.element_spec,))
+    #infer_fn = model.infer
     write_fn = lambda prediction: (
         model.print_prediction(prediction, params=infer_config, stream=stream))
 
     total_time = 0
     total_tokens = 0
     total_examples = 0
+    first_example_time = 0
+    first_example = True
     start_time = time.time()
 
     for source in dataset:
@@ -349,6 +352,9 @@ class Runner(object):
       predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
       end_time = time.time()
       if log_time:
+        if first_example:
+          first_example_time = end_time - start_time
+          first_example = False
         total_time += end_time - start_time
         batch_size = next(six.itervalues(predictions)).shape[0]
         total_examples += batch_size
@@ -373,8 +379,17 @@ class Runner(object):
           "Average prediction time (s): %f", total_time / total_examples)
       if total_tokens > 0:
         tf.get_logger().info("Tokens per second: %f", total_tokens / total_time)
+
+      tf.get_logger().info("First example time (s): %f", first_example_time)
+      if total_examples > 1:
+        tf.get_logger().info(
+          "Average prediction time except first example (s): %f",
+          (total_time - first_example_time) / (total_examples - 1))
+
     if predictions_file:
       stream.close()
+
+    return total_time, first_example_time, total_examples, total_tokens
 
   def infer_with_prefix(self,
             features_file,
@@ -414,21 +429,31 @@ class Runner(object):
 
 
     ordered_writer = None
+
+    tf.print("input_signature", dataset.element_spec)
     infer_fn = tf.function(model.infer_with_prefix, input_signature=(dataset.element_spec,))
+
+    #infer_fn = model.infer_with_prefix
+
     write_fn = lambda prediction: (
         model.print_prediction(prediction, params=infer_config, stream=stream))
 
     total_time = 0
     total_tokens = 0
     total_examples = 0
+    first_example = True
+    first_example_time = 0
     start_time = time.time()
 
     for source in dataset:
-      tf.print("Source:", source)
+      #tf.print("Source:", source)
       predictions = infer_fn(source)
       predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
       end_time = time.time()
       if log_time:
+        if first_example:
+          first_example_time = end_time - start_time
+          first_example = False
         total_time += end_time - start_time
         batch_size = next(six.itervalues(predictions)).shape[0]
         total_examples += batch_size
@@ -453,8 +478,17 @@ class Runner(object):
           "Average prediction time (s): %f", total_time / total_examples)
       if total_tokens > 0:
         tf.get_logger().info("Tokens per second: %f", total_tokens / total_time)
+
+      tf.get_logger().info("First example time (s): %f", first_example_time)
+      if total_examples > 1:
+        tf.get_logger().info(
+          "Average prediction time except first example (s): %f",
+          (total_time - first_example_time) / (total_examples - 1))
+
     if predictions_file:
       stream.close()
+
+    return total_time, first_example_time, total_examples, total_tokens
 
 
   def export(self, export_dir, checkpoint_path=None):
