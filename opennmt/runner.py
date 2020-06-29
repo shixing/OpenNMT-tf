@@ -490,6 +490,18 @@ class Runner(object):
 
     return total_time, first_example_time, total_examples, total_tokens
 
+  def export_with_prefix(self, export_dir, checkpoint_path=None):
+    """Exports a model.
+
+    Args:
+      export_dir: The export directory.
+      checkpoint_path: The checkpoint path to export. If ``None``, the latest is used.
+   """
+    checkpoint, _ = self._init_run()
+    checkpoint.restore(checkpoint_path=checkpoint_path, weights_only=True)
+    checkpoint.model.export_with_prefix(export_dir, self.prefix_inputter)
+
+
 
   def export(self, export_dir, checkpoint_path=None):
     """Exports a model.

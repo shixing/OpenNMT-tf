@@ -3,6 +3,8 @@
 """Standard sequence-to-sequence model."""
 
 import six
+import os
+import tempfile
 
 import tensorflow as tf
 import tensorflow_addons as tfa
@@ -410,7 +412,43 @@ class SequenceToSequence(model.SequenceGenerator):
         predictions[key] = value[:, :num_hypotheses]
     return predictions
 
+  def serve_function_with_prefix(self, prefix_inputter):
+    """Returns a function for serving this model.
 
+    Returns:
+      A ``tf.function``.
+    """
+    # Set name attribute of the input TensorSpec.
+    input_signature = {
+        name:tf.TensorSpec.from_spec(spec, name=name)
+        for name, spec in six.iteritems(prefix_inputter.input_signature(self.features_inputter))}
+
+    tf.print("input_signature in serve_function", input_signature)
+
+    @tf.function(input_signature=(input_signature,))
+    def _run(features):
+      features = self.features_inputter.make_features(features=features.copy())
+      #tf.print("features", features)
+      predictions = self.infer_with_prefix(features)
+      return predictions
+
+    return _run
+
+  def export_with_prefix(self, export_dir, prefix_inputter):
+    """Exports the model to a SavedModel.
+
+    Args:
+      export_dir: The output directory.
+    """
+    tf.saved_model.save(self, export_dir, signatures=self.serve_function_with_prefix(prefix_inputter))
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      extra_assets = self.export_assets(tmp_dir)
+      if extra_assets:
+        assets_extra = os.path.join(export_dir, "assets.extra")
+        tf.io.gfile.makedirs(assets_extra)
+        for filename, path in six.iteritems(extra_assets):
+          tf.io.gfile.copy(path, os.path.join(assets_extra, filename), overwrite=True)
+        tf.get_logger().info("Extra assets written to: %s", assets_extra)
 
   def compute_loss(self, outputs, labels, training=True):
     params = self.params

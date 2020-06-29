@@ -266,13 +266,18 @@ class PrefixInputter(Inputter):
 
     return dataset
 
-  def input_signature(self):
+  def input_signature(self, features_inputter):
     """Returns the input signature of this inputter."""
-    return {
+    source_input_signature = features_inputter.input_signature()
+    prefix_input_signature = {
       "emission_matrix": tf.TensorSpec([None, None, None], tf.int32),
       "transition_matrix": tf.TensorSpec([None, None, None], tf.int32),
-      "length_matrix": tf.TensorSpec([None, None], tf.int32)
+      "length_matrix": tf.TensorSpec([None, None], tf.int32),
+      "init_state": tf.TensorSpec([None], tf.int32)
+
     }
+    prefix_input_signature.update(source_input_signature)
+    return prefix_input_signature
 
   def make_features(self, element=None, features=None, training=None):
     """Creates features from data.

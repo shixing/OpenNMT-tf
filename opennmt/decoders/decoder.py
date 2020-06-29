@@ -471,10 +471,11 @@ class Decoder(tf.keras.layers.Layer):
         length = lm[0][state_idx]
         indexes = em[0][state_idx][:length]
         next_states = tm[0][state_idx][:length]
-        #tf.print(indexes)
+        #tf.print("emission_row",indexes)
         selected_logits = tf.nn.embedding_lookup(logits[0], indexes)
         top1_index = tf.math.argmax(selected_logits)
         top1_vocab_idx = indexes[top1_index]
+        #tf.print("top1_vocab_idx", top1_vocab_idx)
         top1_next_state = next_states[top1_index]
         mask = tf.one_hot(top1_vocab_idx, vocab_size, on_value=0.0, off_value=-100000.0)
         new_logits = logits + mask
