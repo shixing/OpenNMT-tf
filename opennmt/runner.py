@@ -347,7 +347,7 @@ class Runner(object):
     start_time = time.time()
 
     for source in dataset:
-      tf.print("Source:", source)
+      #tf.print("Source:", source)
       predictions = infer_fn(source)
       predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
       end_time = time.time()

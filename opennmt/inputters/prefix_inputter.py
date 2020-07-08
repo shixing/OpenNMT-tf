@@ -89,7 +89,7 @@ def build_allowed_ids(orig_prefix, trie, vocab_to_id, allowed_ids_dict, overwrit
       vocab_id = vocab_to_id[prefix]
       if suffix not in allowed_ids_dict:
         build_allowed_ids(suffix, trie, vocab_to_id, allowed_ids_dict)
-      if suffix in allowed_ids_dict:
+      if suffix in allowed_ids_dict and len(allowed_ids_dict[suffix]) > 0:
         allowed_ids[vocab_id] = suffix
 
   node = trie.search(orig_prefix)
@@ -98,11 +98,10 @@ def build_allowed_ids(orig_prefix, trie, vocab_to_id, allowed_ids_dict, overwrit
     for id in ids:
       allowed_ids[id] = "ALL"
 
-  if len(allowed_ids) > 0:
-    if overwrite_key is not None:
-      allowed_ids_dict[overwrite_key] = allowed_ids
-    else:
-      allowed_ids_dict[orig_prefix] = allowed_ids
+  if overwrite_key is not None:
+    allowed_ids_dict[overwrite_key] = allowed_ids
+  else:
+    allowed_ids_dict[orig_prefix] = allowed_ids
 
 def allowed_ids_dict_to_matrix(allowed_id_dict):
 
@@ -118,7 +117,7 @@ def allowed_ids_dict_to_matrix(allowed_id_dict):
   # breath-first search
 
   q = deque()
-  if start_key in allowed_id_dict:
+  if start_key in allowed_id_dict and len(allowed_id_dict[start_key]) > 0:
     q.append((start_key, 0))
   max_length = 0
 
