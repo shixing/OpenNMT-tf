@@ -3,6 +3,7 @@
 import abc
 import collections
 import os
+import sys
 import six
 
 import numpy as np
@@ -392,8 +393,8 @@ class WordEmbedder(TextInputter):
             start_id=constants.START_OF_SENTENCE_ID if self.mark_start else None,
             end_id=constants.END_OF_SENTENCE_ID if self.mark_end else None)
     if self.decoder_mode:
-      features["ids_out"] = features["ids"][1:]
-      features["ids"] = features["ids"][:-1]
+      features["ids_out"] = features["ids"][..., 1:]
+      features["ids"] = features["ids"][..., :-1]
       features["length"] -= 1
     return features
 

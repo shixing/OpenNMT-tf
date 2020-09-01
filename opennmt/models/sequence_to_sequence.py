@@ -4,6 +4,7 @@
 
 import six
 import os
+import sys
 import tempfile
 
 import tensorflow as tf
@@ -433,6 +434,55 @@ class SequenceToSequence(model.SequenceGenerator):
       return predictions
 
     return _run
+
+  def serve_function_score(self):
+    """Returns a function for serving this model to score.
+
+        Returns:
+          A ``tf.function``.
+        """
+    # Set name attribute of the input TensorSpec.
+    input_signature = {
+      "source_"+name: tf.TensorSpec.from_spec(spec, name="source_"+name)
+      for name, spec in six.iteritems(self.features_inputter.input_signature())}
+    label_signature = {
+      "target_"+name: tf.TensorSpec.from_spec(spec, name="target_"+name)
+      for name, spec in six.iteritems(self.labels_inputter.input_signature())}
+
+    input_signature.update(label_signature)
+    print(input_signature)
+
+    @tf.function(input_signature=(input_signature, ))
+    def _run(features):
+      source_features = {}
+      source_features['tokens'] = features['source_tokens']
+      source_features['length'] = features['source_length']
+      target_features = {}
+      target_features['tokens'] = features['target_tokens']
+      target_features['length'] = features['target_length']
+      features = self.features_inputter.make_features(features=source_features.copy())
+      labels = self.labels_inputter.make_features(features=target_features.copy())
+      scores = self.score(features, labels)
+      return scores
+
+    return _run
+
+  def export_to_score(self, export_dir):
+    """Exports the model to a SavedModel.
+
+        Args:
+          export_dir: The output directory.
+        """
+    tf.saved_model.save(self, export_dir, signatures=self.serve_function_score())
+    with tempfile.TemporaryDirectory() as tmp_dir:
+      extra_assets = self.export_assets(tmp_dir)
+      if extra_assets:
+        assets_extra = os.path.join(export_dir, "assets.extra")
+        tf.io.gfile.makedirs(assets_extra)
+        for filename, path in six.iteritems(extra_assets):
+          tf.io.gfile.copy(path, os.path.join(assets_extra, filename), overwrite=True)
+        tf.get_logger().info("Extra assets written to: %s", assets_extra)
+
 
   def export_with_prefix(self, export_dir, prefix_inputter):
     """Exports the model to a SavedModel.
