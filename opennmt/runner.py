@@ -512,6 +512,17 @@ class Runner(object):
     checkpoint.restore(checkpoint_path=checkpoint_path, weights_only=True)
     checkpoint.model.export_to_score(export_dir)
 
+  def export_3in1(self, export_dir, checkpoint_path=None):
+    """Exports a model to score the source and target.
+
+    Args:
+      export_dir: The export directory.
+      checkpoint_path: The checkpoint path to export. If ``None``, the latest is used.
+   """
+    checkpoint, _ = self._init_run()
+    checkpoint.restore(checkpoint_path=checkpoint_path, weights_only=True)
+    checkpoint.model.export_3in1(export_dir)
+
 
   def export(self, export_dir, checkpoint_path=None):
     """Exports a model.
